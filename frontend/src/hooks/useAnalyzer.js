@@ -1,11 +1,11 @@
 import { useState, useRef } from "react";
-import { API_BASE, LOADING_MESSAGES } from "../utils/constants";
+import { LOADING_MESSAGES } from "../utils/constants";
 
 export function useAnalyzer() {
-  const [url, setUrl]           = useState("");
-  const [loading, setLoading]   = useState(false);
-  const [result, setResult]     = useState(null);
-  const [error, setError]       = useState("");
+  const [url, setUrl]               = useState("");
+  const [loading, setLoading]       = useState(false);
+  const [result, setResult]         = useState(null);
+  const [error, setError]           = useState("");
   const [loadingMsg, setLoadingMsg] = useState("");
   const intervalRef = useRef(null);
 
@@ -19,7 +19,10 @@ export function useAnalyzer() {
   };
 
   const stopLoadingCycle = () => {
-    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
   };
 
   const analyze = async () => {
@@ -30,11 +33,13 @@ export function useAnalyzer() {
     startLoadingCycle();
 
     try {
-      const response = await fetch(`${API_BASE}/api/analyze`, {
+      // Always call /api/analyze — works locally (Vite proxy) and on Vercel
+      const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
       });
+
       const data = await response.json();
       if (!response.ok) throw new Error(data?.details || data?.error || `Server error ${response.status}`);
       setResult(data);

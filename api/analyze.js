@@ -1,4 +1,6 @@
-const Anthropic = require("@anthropic-ai/sdk");
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const SYSTEM_PROMPT = `You are an expert digital marketing analyst and SEO specialist. When given a website URL, you will perform a comprehensive analysis. You MUST respond with valid JSON only — no markdown, no backticks, no explanation outside the JSON.
 
@@ -63,42 +65,45 @@ Return this exact structure:
   }
 }`;
 
-function validateUrl(url) {
-  if (!url || typeof url !== "string") {
-    return { error: "Missing URL", details: "A 'url' field is required." };
-  }
-  url = url.trim();
+function normalizeUrl(raw) {
+  let url = raw.trim();
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
-  try {
-    const parsed = new URL(url);
-    if (!parsed.hostname || !parsed.hostname.includes(".")) throw new Error();
-    return { validatedUrl: parsed.href };
-  } catch {
-    return { error: "Invalid URL", details: "Provide a valid URL e.g. https://example.com" };
-  }
+  const parsed = new URL(url); // throws if invalid
+  if (!parsed.hostname.includes(".")) throw new Error("Invalid hostname");
+  return parsed.href;
 }
 
-module.exports = async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+export default async function handler(req, res) {
+  // CORS headers
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  // Validate input
+  const { url } = req.body || {};
+  if (!url || typeof url !== "string") {
+    return res.status(400).json({ error: "Missing URL", details: "A 'url' field is required." });
   }
 
-  const validation = validateUrl(req.body?.url);
-  if (validation.error) {
-    return res.status(400).json(validation);
-  }
-
-  console.log(`[Analyze] ${validation.validatedUrl}`);
-
+  let validatedUrl;
   try {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    validatedUrl = normalizeUrl(url);
+  } catch {
+    return res.status(400).json({ error: "Invalid URL", details: "Provide a valid URL e.g. https://example.com" });
+  }
+
+  // Call Claude
+  try {
     const message = await client.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 4000,
       system: SYSTEM_PROMPT,
       messages: [{
         role: "user",
-        content: `Analyze this website comprehensively: ${validation.validatedUrl}\n\nBased on the URL, domain name, and any knowledge you have about this brand/company, provide a thorough analysis. Return only valid JSON with no markdown or backticks.`,
+        content: `Analyze this website comprehensively: ${validatedUrl}\n\nBased on the URL, domain name, and any knowledge you have about this brand/company, provide a thorough analysis. Return only valid JSON with no markdown or backticks.`,
       }],
     });
 
@@ -109,9 +114,10 @@ module.exports = async function handler(req, res) {
     const match = clean.match(/\{[\s\S]*\}/);
     if (!match) throw new Error("No valid JSON in Claude response");
 
-    res.json(JSON.parse(match[0]));
+    const analysis = JSON.parse(match[0]);
+    return res.status(200).json(analysis);
   } catch (err) {
-    console.error("[Analyze] Failed:", err.message);
-    res.status(500).json({ error: "Analysis failed", details: err.message });
+    console.error("[analyze] Error:", err.message);
+    return res.status(500).json({ error: "Analysis failed", details: err.message });
   }
-};
+}
